@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+
+import argparse
+import os.path
+import sys
+import configparser
+
+AWS_KEYS = ['aws_secret_access_key', 'aws_access_key_id']
+
+parser = argparse.ArgumentParser(description='AWS profile manager')
+parser.add_argument('--list', dest='list', default=False, action='store_true',
+                    help='List available profiles')
+parser.add_argument('--status', dest='status', default=False, action='store_true',
+                    help='List available profiles')
+parser.add_argument('--clean', dest='clean', default=False, action='store_true',
+                    help='Clear environment of AWS keys and profile.')
+parser.add_argument('--fetch', dest='fetch', type=str,
+                    help='Fetch a specific profile')
+
+args = parser.parse_args()
+
+path = "~/.aws/credentials"
+full_path = os.path.expanduser(path)
+
+config = configparser.ConfigParser()
+config.sections()
+config.read(full_path)
+
+def print_no_eval(text):
+    print(text, file=sys.stderr)
+
+def print_error_and_exit(error, code=1):
+    print_no_eval(error)
+    sys.exit(code)
+
+def write_export_string(key, value):
+    print("export {}={}".format(key, value))
+
+def export(profile):
+    """Output a profile as a set of export strings of a profile to be evaluated by the shell."""
+    for key in AWS_KEYS:
+        if not key in profile:
+            print_error_and_exit("Incomplete profile '{}', '{}' missing!".format(profile, key))
+        if key in profile:
+            write_export_string(key.upper(), profile[key])
+
+    write_export_string('AWS_PROFILE', profile.name)
+    return True
+
+def find_profile(environment):
+    if AWS_KEYS[0].upper() in environment:
+        aws_secret = environment[AWS_KEYS[0].upper()]
+    if AWS_KEYS[1].upper() in environment:
+        aws_id = environment[AWS_KEYS[1].upper()]
+    
+    for profile in config.sections():
+        if config[profile][AWS_KEYS[0]] == aws_secret and config[profile][AWS_KEYS[1]] == aws_id:
+            return config[profile]
+    
+    return
+
+if args.list:
+    for sec in config.sections():
+        print(sec)
+elif args.fetch:
+    profile = args.fetch
+    if profile in config:
+        print_no_eval("AWS profile '{}' activated.".format(profile))
+        export(config[profile])
+    else:
+        print_error_and_exit("AWS profile '{}' not found!".format(profile))
+elif args.status:
+    if 'AWS_PROFILE' in os.environ:
+        print_no_eval("Active profile: {}".format(os.environ['AWS_PROFILE']))
+    elif AWS_KEYS[0].upper() in os.environ or AWS_KEYS[1].upper() in os.environ:
+        profile = find_profile(os.environ)
+        if profile:
+            print_no_eval("Active profile: {}".format(profile.name))
+            export(profile)
+        else:
+            print_error_and_exit("AWS environment variables detected, but no profile set and no matching profile found.")
+    else:
+        print("No active AWS profile.")
+elif args.clean:
+    print("unset AWS_PROFILE")
+    for key in AWS_KEYS:
+        print("unset {}".format(key.upper()))
+    print_no_eval("All AWS environment variables cleaned.")
